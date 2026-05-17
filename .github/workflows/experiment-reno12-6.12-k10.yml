@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_gki:
-        description: "Experiment A: build Reno12 6.12 GKI Image"
+        description: "Build Reno12 6.12 GKI Image"
         required: true
         default: "true"
         type: choice
@@ -13,7 +13,7 @@ on:
           - "false"
 
       build_modules:
-        description: "Experiment B: build/probe MT6895 6.12 device modules"
+        description: "Build/probe Reno12 6.12 MTK/MGK device modules"
         required: true
         default: "true"
         type: choice
@@ -22,7 +22,7 @@ on:
           - "false"
 
       clone_k10_reference:
-        description: "Clone K10 5.10 source and analyze DTS references"
+        description: "Clone K10 5.10 reference source and analyze DTS"
         required: true
         default: "true"
         type: choice
@@ -31,7 +31,7 @@ on:
           - "false"
 
       strict_fail:
-        description: "Fail workflow if GKI/modules build fails"
+        description: "Fail workflow when build fails"
         required: true
         default: "false"
         type: choice
@@ -89,29 +89,49 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           sudo apt-get update
+
           sudo apt-get install -y \
             bc \
             bison \
             build-essential \
+            ca-certificates \
             ccache \
+            cpio \
             curl \
+            device-tree-compiler \
+            file \
             flex \
             git \
             jq \
             kmod \
             libelf-dev \
+            liblz4-tool \
+            libncurses-dev \
             libssl-dev \
             lld \
             llvm \
             lz4 \
+            make \
+            openssl \
+            perl \
+            python-is-python3 \
             python3 \
             python3-pip \
             rsync \
             unzip \
+            wget \
+            xz-utils \
             zip \
             zstd \
             dwarves
+
+          python3 --version
+          gcc --version
+          clang --version || true
+          ld.lld --version || true
+          dtc --version || true
 
       - name: Clone Reno12 6.12 sources
         shell: bash
@@ -128,18 +148,31 @@ jobs:
             "${RENO12_COMMON_REPO}" \
             "${WORKROOT}/kernel-6.12"
 
-          cd "${WORKROOT}"
-
           mkdir -p "${DIST}/logs"
 
-          echo "==== WORKROOT ====" | tee "${DIST}/logs/source-tree.txt"
-          ls -la | tee -a "${DIST}/logs/source-tree.txt"
+          cd "${WORKROOT}"
 
-          echo "==== kernel dir ====" | tee -a "${DIST}/logs/source-tree.txt"
-          ls -la kernel | tee -a "${DIST}/logs/source-tree.txt"
+          {
+            echo "==== WORKROOT ===="
+            pwd
+            ls -la
 
-          echo "==== kernel-6.12 ====" | tee -a "${DIST}/logs/source-tree.txt"
-          ls -la kernel-6.12 | head -120 | tee -a "${DIST}/logs/source-tree.txt"
+            echo
+            echo "==== kernel ===="
+            ls -la kernel || true
+
+            echo
+            echo "==== kernel-6.12 ===="
+            ls -la kernel-6.12 | head -120 || true
+
+            echo
+            echo "==== kernel symlinks ===="
+            find kernel -maxdepth 2 -type l -ls || true
+
+            echo
+            echo "==== common kernel version ===="
+            grep -E "^(VERSION|PATCHLEVEL|SUBLEVEL) =" kernel-6.12/Makefile || true
+          } 2>&1 | tee "${DIST}/logs/clone-reno12-layout.log"
 
           chmod +x kernel/tools/bazel || true
           chmod +x kernel/build/kernel/kleaf/bazel.sh || true
@@ -152,6 +185,7 @@ jobs:
           set -euxo pipefail
 
           mkdir -p "${K10ROOT}"
+          mkdir -p "${DIST}/logs"
 
           git clone --depth=1 --branch "${K10_BRANCH}" \
             "${K10_COMMON_REPO}" \
@@ -161,26 +195,26 @@ jobs:
             "${K10_MODULES_REPO}" \
             "${K10ROOT}/modules-5.10-k10"
 
-          mkdir -p "${DIST}/logs"
-
           {
-            echo "==== K10 kernel Makefile ===="
+            echo "==== K10 kernel version ===="
             grep -E "^(VERSION|PATCHLEVEL|SUBLEVEL) =" "${K10ROOT}/kernel-5.10-k10/Makefile" || true
 
             echo
-            echo "==== K10 DTS MT6895 files ===="
+            echo "==== K10 MT6895 DTS files ===="
             find "${K10ROOT}/kernel-5.10-k10/arch/arm64/boot/dts/mediatek" \
-              -maxdepth 3 \
+              -maxdepth 4 \
               -type f \
               \( -iname "*6895*" -o -iname "*k6895*" -o -iname "*lisa*" -o -iname "*21641*" \) \
               | sort || true
 
             echo
-            echo "==== K10 modules tree ===="
-            find "${K10ROOT}/modules-5.10-k10" -maxdepth 3 -type d | sort | head -300 || true
-          } | tee "${DIST}/logs/k10-reference-layout.txt"
+            echo "==== K10 modules layout ===="
+            find "${K10ROOT}/modules-5.10-k10" -maxdepth 4 -type d \
+              | sort \
+              | head -500 || true
+          } 2>&1 | tee "${DIST}/logs/clone-k10-reference-layout.log"
 
-      - name: Sanity check Reno12 6.12 layout
+      - name: Sanity check Reno12 6.12 source support
         shell: bash
         run: |
           set -euxo pipefail
@@ -189,7 +223,11 @@ jobs:
           mkdir -p "${DIST}/logs"
 
           {
-            echo "==== Reno12 common kernel Makefile ===="
+            echo "==== current dir ===="
+            pwd
+
+            echo
+            echo "==== common kernel version ===="
             grep -E "^(VERSION|PATCHLEVEL|SUBLEVEL) =" ../kernel-6.12/Makefile || true
 
             echo
@@ -202,22 +240,30 @@ jobs:
             cat kernel_device_modules-6.12/mt6895/mgk.enabled || true
 
             echo
-            echo "==== MT6895/K6895/Lisa references in Reno12 6.12 ===="
+            echo "==== MT6895 DTS base files ===="
+            find kernel_device_modules-6.12/arch/arm64/boot/dts \
+              -type f \
+              \( -iname "*mt6895*" -o -iname "*k6895*" -o -iname "*lisa*" -o -iname "*21641*" \) \
+              | sort || true
+
+            echo
+            echo "==== MT6895 / K6895 / Lisa / PGJM10 references ===="
             find kernel_device_modules-6.12 ../vendor/mediatek/kernel_modules ../vendor/oplus \
               -type f \
-              \( -name "*.c" -o -name "*.h" -o -name "*.dts" -o -name "*.dtsi" -o -name "BUILD.bazel" -o -name "Kbuild" -o -name "Makefile" -o -name "*.mk" \) \
+              \( -name "*.c" -o -name "*.h" -o -name "*.dts" -o -name "*.dtsi" -o -name "BUILD.bazel" -o -name "Kbuild" -o -name "Makefile" -o -name "*.mk" -o -name "*.bzl" \) \
               -print0 \
               | xargs -0 grep -In "mt6895\|k6895\|lisa\|21641\|PGJM10" \
-              2>/dev/null | head -1500 || true
+              2>/dev/null \
+              | head -2000 || true
 
             echo
             echo "==== vendor mediatek kernel modules ===="
-            find ../vendor/mediatek/kernel_modules -maxdepth 3 -type d | sort || true
+            find ../vendor/mediatek/kernel_modules -maxdepth 4 -type d | sort || true
 
             echo
             echo "==== vendor oplus modules ===="
-            find ../vendor/oplus -maxdepth 3 -type d | sort || true
-          } | tee "${DIST}/logs/reno12-6.12-layout-and-mt6895-probe.txt"
+            find ../vendor/oplus -maxdepth 4 -type d | sort || true
+          } 2>&1 | tee "${DIST}/logs/source-support-mt6895.log"
 
       - name: Check MT6895 pinctrl clock power-domain support
         shell: bash
@@ -238,18 +284,18 @@ jobs:
             echo "==== MT6895 clock files ===="
             find kernel_device_modules-6.12 ../kernel-6.12 \
               -type f \
-              \( -name "*clk*mt6895*" -o -name "*mt6895*clk*" -o -name "*fmeter*mt6895*" \) \
+              \( -name "*clk*mt6895*" -o -name "*mt6895*clk*" -o -name "*fmeter*mt6895*" -o -name "*clkchk*mt6895*" -o -name "*clkdbg*mt6895*" \) \
               2>/dev/null | sort || true
 
             echo
-            echo "==== MT6895 power-domain / scpsys / dvfsrc files ===="
+            echo "==== MT6895 power-domain / scpsys / dvfsrc / spm files ===="
             find kernel_device_modules-6.12 ../kernel-6.12 \
               -type f \
-              \( -name "*mt6895*power*" -o -name "*mt6895*scpsys*" -o -name "*dvfsrc*" -o -name "*spm*" \) \
+              \( -name "*mt6895*power*" -o -name "*mt6895*scpsys*" -o -name "*dvfsrc*" -o -name "*spm*" -o -name "*mt6895*spm*" \) \
               2>/dev/null | sort || true
 
             echo
-            echo "==== MT6895 compatible strings in pinctrl/clk/power ===="
+            echo "==== MT6895 compatible strings in pinctrl / clk / power ===="
             grep -RIn \
               "mediatek,mt6895\|mt6895" \
               kernel_device_modules-6.12/drivers/pinctrl \
@@ -259,7 +305,8 @@ jobs:
               ../kernel-6.12/drivers/pinctrl \
               ../kernel-6.12/drivers/clk \
               ../kernel-6.12/drivers/soc \
-              2>/dev/null | head -1200 || true
+              2>/dev/null \
+              | head -2000 || true
 
             echo
             echo "==== MT6895 DT bindings ===="
@@ -269,7 +316,7 @@ jobs:
               2>/dev/null \
               | grep -Ei "mt6895|mtk|mediatek" \
               | sort || true
-          } | tee "${DIST}/logs/check-mt6895-pinctrl-clock-powerdomain.txt"
+          } 2>&1 | tee "${DIST}/logs/check-mt6895-pinctrl-clock-powerdomain.log"
 
       - name: Check MT6895 PMIC regulator charger Type-C support
         shell: bash
@@ -309,19 +356,21 @@ jobs:
               -type f \
               2>/dev/null \
               | grep -Ei "typec|tcpc|pd|usb.*mt|mt.*usb|ps5170|mt6375" \
-              | sort | head -1000 || true
+              | sort \
+              | head -1500 || true
 
             echo
-            echo "==== PMIC/regulator/charger compatible strings in Reno12 6.12 ===="
+            echo "==== PMIC / regulator / charger refs in Reno12 6.12 ===="
             grep -RIn \
               "mt6359p\|mt6363\|mt6366\|mt6368\|mt6369\|mt6373\|mt6375\|mt6380\|fan53870\|wl2868\|regulator\|gauge\|charger\|pdc\|typec\|ps5170" \
               kernel_device_modules-6.12 \
               ../vendor/oplus \
               ../vendor/mediatek/kernel_modules \
-              2>/dev/null | head -1500 || true
-          } | tee "${DIST}/logs/check-mt6895-pmic-regulator-charger-typec.txt"
+              2>/dev/null \
+              | head -2000 || true
+          } 2>&1 | tee "${DIST}/logs/check-mt6895-pmic-regulator-charger-typec.log"
 
-      - name: Analyze K10 DTS references
+      - name: Analyze K10 DTS references and compatible coverage
         if: ${{ github.event.inputs.clone_k10_reference == 'true' }}
         shell: bash
         continue-on-error: true
@@ -344,24 +393,26 @@ jobs:
               "${K10_DTS_DIR}/k6895v1_64.dts" \
               "${K10_DTS_DIR}"/cust_mt6895*.dtsi \
               "${K10_DTS_DIR}"/nfc/*6895* \
-              2>/dev/null | head -2000 || true
+              2>/dev/null \
+              | head -2500 || true
 
             echo
             echo "==== K10 PMIC / regulator / charger refs ===="
             grep -RIn \
               "mt6359p\|mt6363\|mt6366\|mt6368\|mt6369\|mt6373\|mt6375\|mt6380\|fan53870\|wl2868\|regulator\|gauge\|charger\|battery\|typec\|pdc\|ps5170" \
               "${K10_DTS_DIR}" \
-              2>/dev/null | head -2000 || true
+              2>/dev/null \
+              | head -2500 || true
 
             echo
             echo "==== K10 pinctrl / clock / power-domain refs ===="
             grep -RIn \
               "pinctrl\|eint\|interrupts\|clocks\|clock-names\|power-domains\|scpsys\|dvfsrc\|mmsys\|smi\|iommu" \
               "${K10_DTS_DIR}" \
-              2>/dev/null | head -2000 || true
-          } | tee "${DIST}/logs/k10-dts-board-analysis.txt"
+              2>/dev/null \
+              | head -2500 || true
+          } 2>&1 | tee "${DIST}/logs/k10-dts-board-analysis.log"
 
-          # 提取 K10 DTS compatible 字符串
           grep -Rho 'compatible[[:space:]]*=[^;]*;' "${K10_DTS_DIR}" \
             2>/dev/null \
             | sed -E 's/.*compatible[[:space:]]*=[[:space:]]*//; s/;//' \
@@ -371,10 +422,9 @@ jobs:
             | sort -u \
             > "${DIST}/k10-analysis/k10-compatible-list.txt" || true
 
-          echo "==== K10 compatible count ===="
-          wc -l "${DIST}/k10-analysis/k10-compatible-list.txt" | tee "${DIST}/logs/k10-compatible-count.txt" || true
+          wc -l "${DIST}/k10-analysis/k10-compatible-list.txt" \
+            | tee "${DIST}/logs/k10-compatible-count.log" || true
 
-          # 检查 compatible 在 Reno12 6.12 驱动/模块源码中是否出现
           : > "${DIST}/k10-analysis/k10-compatible-found-in-reno12-6.12.txt"
           : > "${DIST}/k10-analysis/k10-compatible-missing-in-reno12-6.12.txt"
 
@@ -395,9 +445,9 @@ jobs:
             echo
             echo "==== MISSING compatible in Reno12 6.12 ===="
             cat "${DIST}/k10-analysis/k10-compatible-missing-in-reno12-6.12.txt" || true
-          } | tee "${DIST}/logs/k10-compatible-coverage-report.txt"
+          } 2>&1 | tee "${DIST}/logs/k10-compatible-coverage-report.log"
 
-      - name: Query Bazel targets
+      - name: Query Bazel targets with full logs
         shell: bash
         continue-on-error: true
         run: |
@@ -406,18 +456,49 @@ jobs:
           cd "${WORKROOT}/kernel"
           mkdir -p "${DIST}/logs"
 
-          ./tools/bazel query '//kernel-6.12:*' \
-            | sort \
-            | tee "${DIST}/logs/query-kernel-6.12-targets.txt" || true
+          {
+            echo "==== pwd ===="
+            pwd
 
-          ./tools/bazel query '//kernel_device_modules-6.12:*' \
-            | sort \
-            | tee "${DIST}/logs/query-kernel-device-modules-6.12-targets.txt" || true
+            echo
+            echo "==== tools/bazel ===="
+            ls -la tools/bazel || true
+            file tools/bazel || true
+            readlink -f tools/bazel || true
 
-          ./tools/bazel query '//...' \
-            | grep -Ei 'mgk|k612|mtk|device|module|dtb|dtbo|dist|mt6895|k6895|gki|aarch64' \
-            | sort \
-            | tee "${DIST}/logs/query-interesting-targets.txt" || true
+            echo
+            echo "==== WORKSPACE / MODULE.bazel / BUILD.bazel ===="
+            ls -la WORKSPACE MODULE.bazel BUILD.bazel 2>/dev/null || true
+            readlink -f WORKSPACE 2>/dev/null || true
+            readlink -f MODULE.bazel 2>/dev/null || true
+            readlink -f BUILD.bazel 2>/dev/null || true
+
+            echo
+            echo "==== build tree sample ===="
+            find build -maxdepth 4 -type f | sort | head -500 || true
+
+            echo
+            echo "==== bazel version ===="
+            ./tools/bazel version || true
+
+            echo
+            echo "==== bazel info ===="
+            ./tools/bazel info || true
+
+            echo
+            echo "==== query //kernel-6.12:* ===="
+            ./tools/bazel query '//kernel-6.12:*' || true
+
+            echo
+            echo "==== query //kernel_device_modules-6.12:* ===="
+            ./tools/bazel query '//kernel_device_modules-6.12:*' || true
+
+            echo
+            echo "==== query all interesting ===="
+            ./tools/bazel query '//...' 2>&1 \
+              | grep -Ei 'mgk|k612|mtk|device|module|dtb|dtbo|dist|mt6895|k6895|gki|aarch64|kernel_aarch64' \
+              | sort || true
+          } 2>&1 | tee "${DIST}/logs/query-bazel-full.log"
 
       - name: Experiment A - build Reno12 6.12 GKI Image
         if: ${{ github.event.inputs.build_gki == 'true' }}
@@ -431,63 +512,83 @@ jobs:
 
           GKI_BUILT=0
 
-          CANDIDATES=(
-            "//kernel-6.12:kernel_aarch64_dist"
-            "//kernel-6.12:gki_aarch64_dist"
-            "//kernel-6.12:kernel_aarch64"
-          )
+          {
+            echo "==== Try known GKI targets ===="
 
-          for target in "${CANDIDATES[@]}"; do
-            echo "Trying GKI target: ${target}"
+            for target in \
+              "//kernel-6.12:kernel_aarch64_dist" \
+              "//kernel-6.12:gki_aarch64_dist" \
+              "//kernel-6.12:kernel_aarch64" \
+              "//kernel-6.12:kernel_aarch64_download_or_build" \
+              "//kernel-6.12:gki_aarch64" \
+              "//kernel-6.12:kernel_images" \
+              "//kernel-6.12:kernel"
+            do
+              echo
+              echo "==== Checking ${target} ===="
 
-            if ./tools/bazel query "${target}" >/dev/null 2>&1; then
-              if [[ "${target}" == *_dist ]]; then
-                if ./tools/bazel run ${BAZEL_FLAGS} \
-                  "${target}" \
-                  -- --destdir="${DIST}/gki" \
-                  2>&1 | tee "${DIST}/logs/experiment-a-gki-$(basename "${target}").log"; then
-                  GKI_BUILT=1
-                  break
+              if ./tools/bazel query "${target}" >/dev/null 2>&1; then
+                echo "FOUND ${target}"
+
+                if echo "${target}" | grep -q "_dist$"; then
+                  if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/gki"; then
+                    GKI_BUILT=1
+                    break
+                  fi
+                else
+                  if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
+                    GKI_BUILT=1
+                    BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
+                    if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
+                      find "${BAZEL_BIN}" -type f \( \
+                        -name "Image" -o \
+                        -name "Image.gz" -o \
+                        -name "Image.lz4" -o \
+                        -name "vmlinux" -o \
+                        -name "System.map" \
+                      \) -print | sort > "${DIST}/logs/experiment-a-gki-bazel-files.list" || true
+
+                      while read -r f; do
+                        [ -f "$f" ] || continue
+                        cp -av "$f" "${DIST}/gki/" || true
+                      done < "${DIST}/logs/experiment-a-gki-bazel-files.list"
+                    fi
+                    break
+                  fi
                 fi
               else
-                if ./tools/bazel build ${BAZEL_FLAGS} \
-                  "${target}" \
-                  2>&1 | tee "${DIST}/logs/experiment-a-gki-$(basename "${target}").log"; then
-                  GKI_BUILT=1
-
-                  BAZEL_BIN="$(./tools/bazel info bazel-bin)"
-                  find "${BAZEL_BIN}" -type f \( \
-                    -name "Image" -o \
-                    -name "Image.gz" -o \
-                    -name "Image.lz4" -o \
-                    -name "vmlinux" -o \
-                    -name "System.map" \
-                  \) -print | sort | tee "${DIST}/logs/experiment-a-gki-bazel-output-files.txt" || true
-
-                  while read -r f; do
-                    [ -f "$f" ] || continue
-                    cp -av "$f" "${DIST}/gki/" || true
-                  done < "${DIST}/logs/experiment-a-gki-bazel-output-files.txt"
-
-                  break
-                fi
+                echo "MISSING ${target}"
               fi
-            else
-              echo "Missing GKI target: ${target}"
+            done
+
+            echo
+            echo "GKI_BUILT=${GKI_BUILT}"
+
+            echo
+            echo "==== gki dist files ===="
+            find "${DIST}/gki" -maxdepth 5 -type f | sort || true
+
+            echo
+            echo "==== bazel-bin interesting image files ===="
+            BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
+            if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
+              find "${BAZEL_BIN}" -type f \( \
+                -name "Image" -o \
+                -name "Image.gz" -o \
+                -name "Image.lz4" -o \
+                -name "vmlinux" -o \
+                -name "System.map" \
+              \) -print | sort || true
             fi
-          done
+          } 2>&1 | tee "${DIST}/logs/experiment-a-gki-full.log"
 
-          echo "GKI_BUILT=${GKI_BUILT}" | tee "${DIST}/logs/experiment-a-gki-result.txt"
-
-          find "${DIST}/gki" -maxdepth 5 -type f \
-            | sort \
-            | tee "${DIST}/logs/experiment-a-gki-files.txt" || true
+          echo "GKI_BUILT=${GKI_BUILT}" > "${DIST}/logs/experiment-a-gki-result.txt"
 
           if [ "${GKI_BUILT}" != "1" ] && [ "${{ github.event.inputs.strict_fail }}" = "true" ]; then
             exit 1
           fi
 
-      - name: Experiment B - build MT6895 / MGK device modules by Bazel
+      - name: Experiment B - build MT6895 MGK device modules by Bazel
         if: ${{ github.event.inputs.build_modules == 'true' }}
         shell: bash
         continue-on-error: true
@@ -497,81 +598,100 @@ jobs:
           cd "${WORKROOT}/kernel"
           mkdir -p "${DIST}/modules-bazel" "${DIST}/logs"
 
-          QUERY_FILE="${DIST}/logs/query-kernel-device-modules-6.12-targets.txt"
-
-          if [ ! -s "${QUERY_FILE}" ]; then
-            ./tools/bazel query '//kernel_device_modules-6.12:*' \
-              | sort \
-              | tee "${QUERY_FILE}" || true
-          fi
-
-          {
-            echo "==== Candidate module targets ===="
-            grep -Ei 'mgk_64_k612|mgk|k612|dist|module|dtb|dtbo' "${QUERY_FILE}" | sort || true
-          } | tee "${DIST}/logs/experiment-b-candidate-module-targets.txt"
-
           MODULES_BUILT=0
 
-          CANDIDATES=(
-            "//kernel_device_modules-6.12:mgk_64_k612_dist"
-            "//kernel_device_modules-6.12:mgk_64_k612"
-            "//kernel_device_modules-6.12:kernel_device_modules_dist"
-            "//kernel_device_modules-6.12:kernel_device_modules"
-          )
+          {
+            echo "==== Query candidate module targets ===="
+            ./tools/bazel query '//kernel_device_modules-6.12:*' 2>&1 \
+              | sort \
+              | tee "${DIST}/logs/experiment-b-module-targets.raw" || true
 
-          for target in "${CANDIDATES[@]}"; do
-            echo "Trying module target: ${target}"
+            echo
+            echo "==== Candidate filtered targets ===="
+            cat "${DIST}/logs/experiment-b-module-targets.raw" \
+              | grep -Ei 'mgk_64_k612|mgk|k612|dist|module|dtb|dtbo' \
+              | sort || true
 
-            if grep -qx "${target}" "${QUERY_FILE}"; then
-              if [[ "${target}" == *_dist ]]; then
-                if ./tools/bazel run ${BAZEL_FLAGS} \
-                  "${target}" \
-                  -- --destdir="${DIST}/modules-bazel" \
-                  2>&1 | tee "${DIST}/logs/experiment-b-modules-$(basename "${target}").log"; then
-                  MODULES_BUILT=1
-                  break
+            echo
+            echo "==== Try known module targets ===="
+
+            for target in \
+              "//kernel_device_modules-6.12:mgk_64_k612_dist" \
+              "//kernel_device_modules-6.12:mgk_64_k612" \
+              "//kernel_device_modules-6.12:kernel_device_modules_dist" \
+              "//kernel_device_modules-6.12:kernel_device_modules" \
+              "//kernel_device_modules-6.12:modules" \
+              "//kernel_device_modules-6.12:dtbs" \
+              "//kernel_device_modules-6.12:dtbo"
+            do
+              echo
+              echo "==== Checking ${target} ===="
+
+              if ./tools/bazel query "${target}" >/dev/null 2>&1; then
+                echo "FOUND ${target}"
+
+                if echo "${target}" | grep -q "_dist$"; then
+                  if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/modules-bazel"; then
+                    MODULES_BUILT=1
+                    break
+                  fi
+                else
+                  if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
+                    MODULES_BUILT=1
+
+                    BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
+                    if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
+                      find "${BAZEL_BIN}" -type f \( \
+                        -name "*.ko" -o \
+                        -name "*.dtb" -o \
+                        -name "*.dtbo" -o \
+                        -name "modules.order" -o \
+                        -name "Module.symvers" -o \
+                        -name "*.symvers" \
+                      \) -print | sort > "${DIST}/logs/experiment-b-bazel-built-files.list" || true
+
+                      while read -r f; do
+                        [ -f "$f" ] || continue
+                        cp -av "$f" "${DIST}/modules-bazel/" || true
+                      done < "${DIST}/logs/experiment-b-bazel-built-files.list"
+                    fi
+                    break
+                  fi
                 fi
               else
-                if ./tools/bazel build ${BAZEL_FLAGS} \
-                  "${target}" \
-                  2>&1 | tee "${DIST}/logs/experiment-b-modules-$(basename "${target}").log"; then
-                  MODULES_BUILT=1
-
-                  BAZEL_BIN="$(./tools/bazel info bazel-bin)"
-                  echo "bazel-bin=${BAZEL_BIN}" | tee "${DIST}/logs/experiment-b-bazel-bin.txt"
-
-                  find "${BAZEL_BIN}" -type f \( \
-                    -name "*.ko" -o \
-                    -name "*.dtb" -o \
-                    -name "*.dtbo" -o \
-                    -name "modules.order" -o \
-                    -name "Module.symvers" \
-                  \) -print | sort | tee "${DIST}/logs/experiment-b-bazel-output-files.txt" || true
-
-                  while read -r f; do
-                    [ -f "$f" ] || continue
-                    cp -av "$f" "${DIST}/modules-bazel/" || true
-                  done < "${DIST}/logs/experiment-b-bazel-output-files.txt"
-
-                  break
-                fi
+                echo "MISSING ${target}"
               fi
-            else
-              echo "Missing module target: ${target}"
+            done
+
+            echo
+            echo "MODULES_BUILT=${MODULES_BUILT}"
+
+            echo
+            echo "==== module dist files ===="
+            find "${DIST}/modules-bazel" -maxdepth 8 -type f | sort || true
+
+            echo
+            echo "==== bazel-bin interesting module files ===="
+            BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
+            if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
+              find "${BAZEL_BIN}" -type f \( \
+                -name "*.ko" -o \
+                -name "*.dtb" -o \
+                -name "*.dtbo" -o \
+                -name "modules.order" -o \
+                -name "Module.symvers" -o \
+                -name "*.symvers" \
+              \) -print | sort || true
             fi
-          done
+          } 2>&1 | tee "${DIST}/logs/experiment-b-modules-bazel-full.log"
 
-          echo "MODULES_BUILT=${MODULES_BUILT}" | tee "${DIST}/logs/experiment-b-modules-result.txt"
-
-          find "${DIST}/modules-bazel" -maxdepth 6 -type f \
-            | sort \
-            | tee "${DIST}/logs/experiment-b-modules-files.txt" || true
+          echo "MODULES_BUILT=${MODULES_BUILT}" > "${DIST}/logs/experiment-b-modules-result.txt"
 
           if [ "${MODULES_BUILT}" != "1" ] && [ "${{ github.event.inputs.strict_fail }}" = "true" ]; then
             exit 1
           fi
 
-      - name: Experiment B fallback - build.config.mtk_kernel_device_modules
+      - name: Experiment B fallback - build via build.config.mtk_kernel_device_modules
         if: ${{ github.event.inputs.build_modules == 'true' }}
         shell: bash
         continue-on-error: true
@@ -583,32 +703,44 @@ jobs:
 
           CONFIG="kernel_device_modules-6.12/build.config.mtk_kernel_device_modules"
 
-          if [ ! -f "${CONFIG}" ]; then
-            echo "Missing ${CONFIG}"
-            exit 1
-          fi
+          {
+            echo "==== build config path ===="
+            echo "${CONFIG}"
 
-          cat "${CONFIG}" | tee "${DIST}/logs/experiment-b-build-config-file.txt"
+            echo
+            echo "==== build config content ===="
+            cat "${CONFIG}" || true
 
-          export BUILD_CONFIG="${CONFIG}"
-          export DIST_DIR="${DIST}/modules-buildconfig"
-          export OUT_DIR="${WORKROOT}/out/modules-buildconfig"
-          export SKIP_MRPROPER=1
+            echo
+            echo "==== build scripts ===="
+            ls -la build || true
+            ls -la build/build.sh 2>/dev/null || true
+            ls -la build/kernel/build.sh 2>/dev/null || true
 
-          if [ -x build/build.sh ]; then
-            build/build.sh \
-              2>&1 | tee "${DIST}/logs/experiment-b-buildconfig-build.log"
-          elif [ -x build/kernel/build.sh ]; then
-            build/kernel/build.sh \
-              2>&1 | tee "${DIST}/logs/experiment-b-buildconfig-build.log"
-          else
-            echo "No build/build.sh or build/kernel/build.sh found."
-            exit 1
-          fi
+            export BUILD_CONFIG="${CONFIG}"
+            export DIST_DIR="${DIST}/modules-buildconfig"
+            export OUT_DIR="${WORKROOT}/out/modules-buildconfig"
+            export SKIP_MRPROPER=1
 
-          find "${DIST}/modules-buildconfig" -maxdepth 6 -type f \
-            | sort \
-            | tee "${DIST}/logs/experiment-b-buildconfig-files.txt" || true
+            echo
+            echo "==== env ===="
+            env | sort | grep -E "BUILD_CONFIG|DIST_DIR|OUT_DIR|SKIP_MRPROPER|PATH|LLVM|ARCH" || true
+
+            echo
+            echo "==== run build_config build ===="
+            if [ -x build/build.sh ]; then
+              build/build.sh
+            elif [ -x build/kernel/build.sh ]; then
+              build/kernel/build.sh
+            else
+              echo "No build/build.sh or build/kernel/build.sh found."
+              exit 1
+            fi
+
+            echo
+            echo "==== buildconfig output files ===="
+            find "${DIST}/modules-buildconfig" -maxdepth 8 -type f | sort || true
+          } 2>&1 | tee "${DIST}/logs/experiment-b-buildconfig-full.log"
 
       - name: Collect module metadata
         if: always()
@@ -630,10 +762,12 @@ jobs:
               echo "---- ${ko} ----"
               modinfo "$ko" 2>/dev/null | grep -E "^(filename|name|vermagic|depends|intree|signer|parm):" || true
             done < <(find "${DIST}" -type f -name "*.ko" | sort)
-          } | tee "${DIST}/logs/built-module-metadata.txt"
+          } 2>&1 | tee "${DIST}/logs/built-module-metadata.log"
 
-          find "${DIST}" -type f -name "*.ko" -print0 \
-            | xargs -0 -I{} sh -c 'cp -av "$1" "${DIST}/module-metadata/" || true' sh {}
+          while read -r ko; do
+            [ -f "$ko" ] || continue
+            cp -av "$ko" "${DIST}/module-metadata/" || true
+          done < <(find "${DIST}" -type f -name "*.ko" | sort)
 
       - name: Final collect useful outputs
         if: always()
@@ -660,12 +794,18 @@ jobs:
             -name "Module.symvers" -o \
             -name "abi_symbollist" -o \
             -name "*.symvers" \
-          \) -print | sort | tee "${DIST}/logs/final-interesting-files.txt" || true
+          \) -print | sort | tee "${DIST}/logs/final-interesting-files.log" || true
 
           while read -r f; do
             [ -f "$f" ] || continue
             cp -av "$f" "${DIST}/final/" || true
-          done < "${DIST}/logs/final-interesting-files.txt"
+          done < "${DIST}/logs/final-interesting-files.log"
+
+          echo "==== final files ===="
+          find "${DIST}/final" -maxdepth 2 -type f | sort || true
+
+          echo "==== logs ===="
+          find "${DIST}/logs" -maxdepth 1 -type f | sort || true
 
           tar -C "${DIST}" -czf "${{ github.workspace }}/reno12-6.12-k10-experiment-final.tar.gz" \
             final logs k10-analysis module-metadata \
