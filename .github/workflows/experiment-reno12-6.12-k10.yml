@@ -177,7 +177,7 @@ jobs:
           mkdir -p prebuilts
 
           {
-            echo "==== Clone prebuilts/build-tools ===="
+            echo "==== Clone platform prebuilts/build-tools for py3-cmd ===="
             if [ ! -d prebuilts/build-tools ]; then
               git clone --depth=1 \
                 https://android.googlesource.com/platform/prebuilts/build-tools \
@@ -185,12 +185,11 @@ jobs:
             fi
 
             echo
-            echo "==== Clone prebuilts/bazel/linux-x86_64 ===="
-            if [ ! -d prebuilts/bazel/linux-x86_64 ]; then
-              mkdir -p prebuilts/bazel
+            echo "==== Clone kernel prebuilts/build-tools as prebuilts/kernel-build-tools ===="
+            if [ ! -d prebuilts/kernel-build-tools ]; then
               git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/bazel/linux-x86_64 \
-                prebuilts/bazel/linux-x86_64
+                https://android.googlesource.com/kernel/prebuilts/build-tools \
+                prebuilts/kernel-build-tools
             fi
 
             echo
@@ -220,12 +219,15 @@ jobs:
             fi
 
             echo
-            echo "==== Required files ===="
+            echo "==== Required py3-cmd ===="
             ls -la prebuilts/build-tools/linux_musl-x86/bin/py3-cmd || true
+            file prebuilts/build-tools/linux_musl-x86/bin/py3-cmd || true
 
             echo
-            echo "==== Bazel prebuilt sample ===="
-            find prebuilts/bazel/linux-x86_64 -maxdepth 4 -type f | sort | head -80 || true
+            echo "==== Required kernel bazel ===="
+            ls -la prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
+            file prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
+            chmod +x prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
 
             echo
             echo "==== Clang sample ===="
@@ -254,6 +256,12 @@ jobs:
             file prebuilts/build-tools/linux_musl-x86/bin/py3-cmd || true
 
             echo
+            echo "==== kernel-build-tools bazel ===="
+            ls -la prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
+            file prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
+            prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel --version || true
+
+            echo
             echo "==== tools/bazel ===="
             ls -la tools/bazel || true
             file tools/bazel || true
@@ -261,7 +269,7 @@ jobs:
 
             echo
             echo "==== bazel.origin.sh first lines ===="
-            sed -n '1,100p' build/kernel/kleaf/bazel.origin.sh || true
+            sed -n '1,120p' build/kernel/kleaf/bazel.origin.sh || true
 
             echo
             echo "==== tools/bazel version ===="
