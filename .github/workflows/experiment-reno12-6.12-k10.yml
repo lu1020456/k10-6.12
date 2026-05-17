@@ -65,11 +65,7 @@ jobs:
       WORKROOT: ${{ github.workspace }}/kernel_platform
       DIST: ${{ github.workspace }}/kernel_platform/dist
 
-      # Important:
-      # This must match the real Bazel package name.
-      # The package //kernel-6.12 contains build.config.constants.
       KERNEL_VERSION: "kernel-6.12"
-
       BAZEL_FLAGS: "--jobs=6 --keep_going --verbose_failures"
 
     steps:
@@ -173,13 +169,13 @@ jobs:
             grep -E "^(VERSION|PATCHLEVEL|SUBLEVEL) =" kernel-6.12/Makefile || true
 
             echo
-            echo "==== kernel symlinks ===="
-            find kernel -maxdepth 2 -type l -ls || true
-
-            echo
             echo "==== verify build.config.constants ===="
             ls -la kernel-6.12/build.config.constants || true
             cat kernel-6.12/build.config.constants || true
+
+            echo
+            echo "==== kernel symlinks ===="
+            find kernel -maxdepth 2 -type l -ls || true
           } 2>&1 | tee "${DIST}/logs/clone-reno12-layout.log"
 
           chmod +x kernel/tools/bazel || true
@@ -251,6 +247,12 @@ jobs:
             fi
 
             echo
+            echo "==== Clone Bazel common rules ===="
+
+            clone_aosp "platform/build/bazel_common_rules" \
+              "build/bazel_common_rules"
+
+            echo
             echo "==== Clone Bazel / Bzlmod external repositories ===="
 
             clone_aosp "platform/external/bazelbuild-bazel-central-registry" \
@@ -319,6 +321,14 @@ jobs:
             chmod +x prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
 
             echo
+            echo "==== kernel-build-tools sysroot sample ===="
+            find prebuilts/kernel-build-tools/sysroot -maxdepth 3 -type f | sort | head -40 || true
+
+            echo
+            echo "==== build/bazel_common_rules sample ===="
+            find build/bazel_common_rules -maxdepth 3 -type f | sort | head -80 || true
+
+            echo
             echo "==== Clang sample ===="
             find prebuilts/clang/host/linux-x86 -maxdepth 5 -type f -name clang | sort | head -20 || true
 
@@ -331,16 +341,13 @@ jobs:
             find prebuilts/jdk -maxdepth 8 -type f -name java | sort | head -20 || true
 
             echo
-            echo "==== NDK sample ===="
-            find prebuilts/ndk-r27 -maxdepth 4 -type f | sort | head -40 || true
-
-            echo
             echo "==== Bazel Central Registry stardoc sample ===="
             ls -la external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel || true
 
             echo
             echo "==== External repository summary ===="
             for d in \
+              build/bazel_common_rules \
               external/bazelbuild-bazel-central-registry \
               external/bazel-skylib \
               external/bazelbuild-platforms \
@@ -385,7 +392,7 @@ jobs:
             ls -la kernel-6.12/build.config.constants || true
 
             echo
-            echo "==== Patch missing BUILD files for local .bzl packages ===="
+            echo "==== Patch BUILD files for local .bzl packages ===="
 
             touch build/BUILD.bazel
 
@@ -395,16 +402,40 @@ jobs:
             mkdir -p build/bazel_common_rules/dist
             touch build/bazel_common_rules/dist/BUILD.bazel
 
+            mkdir -p build/bazel_common_rules/exec
+            touch build/bazel_common_rules/exec/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules/platforms
+            touch build/bazel_common_rules/platforms/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules/rules
+            touch build/bazel_common_rules/rules/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules/workspace
+            touch build/bazel_common_rules/workspace/BUILD.bazel
+
+            echo
+            echo "==== Patch build/kernel/build-tools symlink ===="
+
+            rm -rf build/kernel/build-tools
+            ln -s ../../prebuilts/kernel-build-tools build/kernel/build-tools
+
             echo
             echo "==== Verify patched BUILD files ===="
             ls -la build/BUILD.bazel || true
             ls -la build/bazel_common_rules/BUILD.bazel || true
             ls -la build/bazel_common_rules/dist/BUILD.bazel || true
+            ls -la build/bazel_common_rules/dist/dist.bzl || true
+            ls -la build/kernel/build-tools || true
+            ls -la build/kernel/build-tools/sysroot || true
 
             echo
             echo "==== dist.bzl ===="
-            ls -la build/bazel_common_rules/dist/dist.bzl || true
             sed -n '1,120p' build/bazel_common_rules/dist/dist.bzl || true
+
+            echo
+            echo "==== build/kernel/BUILD.bazel first lines ===="
+            sed -n '1,80p' build/kernel/BUILD.bazel || true
           } 2>&1 | tee "${DIST}/logs/patch-local-bazel-workspace.log"
 
       - name: Verify Bazel launcher
@@ -429,6 +460,15 @@ jobs:
             ls -la prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
             file prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
             prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel --version || true
+
+            echo
+            echo "==== build/kernel/build-tools ===="
+            ls -la build/kernel/build-tools || true
+            ls -la build/kernel/build-tools/sysroot || true
+
+            echo
+            echo "==== Bazel Common Rules ===="
+            ls -la build/bazel_common_rules/dist/dist.bzl || true
 
             echo
             echo "==== Bazel Central Registry stardoc check ===="
@@ -479,6 +519,8 @@ jobs:
             echo "==== package visibility ===="
             ls -la kernel-6.12/BUILD.bazel || true
             ls -la kernel-6.12/build.config.constants || true
+            ls -la build/bazel_common_rules/dist/dist.bzl || true
+            ls -la build/kernel/build-tools/sysroot || true
 
             echo
             echo "==== bazel version ===="
