@@ -24,7 +24,7 @@ on:
       clone_ndk:
         description: "Clone platform/prebuilts/ndk as prebuilts/ndk-r27"
         required: true
-        default: "true"
+        default: "false"
         type: choice
         options:
           - "true"
@@ -65,7 +65,11 @@ jobs:
       WORKROOT: ${{ github.workspace }}/kernel_platform
       DIST: ${{ github.workspace }}/kernel_platform/dist
 
-      KERNEL_VERSION: "mgk-6.12"
+      # Important:
+      # This must match the real Bazel package name.
+      # The package //kernel-6.12 contains build.config.constants.
+      KERNEL_VERSION: "kernel-6.12"
+
       BAZEL_FLAGS: "--jobs=6 --keep_going --verbose_failures"
 
     steps:
@@ -171,6 +175,11 @@ jobs:
             echo
             echo "==== kernel symlinks ===="
             find kernel -maxdepth 2 -type l -ls || true
+
+            echo
+            echo "==== verify build.config.constants ===="
+            ls -la kernel-6.12/build.config.constants || true
+            cat kernel-6.12/build.config.constants || true
           } 2>&1 | tee "${DIST}/logs/clone-reno12-layout.log"
 
           chmod +x kernel/tools/bazel || true
@@ -326,8 +335,8 @@ jobs:
             find prebuilts/ndk-r27 -maxdepth 4 -type f | sort | head -40 || true
 
             echo
-            echo "==== Bazel Central Registry sample ===="
-            find external/bazelbuild-bazel-central-registry/modules -maxdepth 3 -type f -name MODULE.bazel | sort | head -80 || true
+            echo "==== Bazel Central Registry stardoc sample ===="
+            ls -la external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel || true
 
             echo
             echo "==== External repository summary ===="
@@ -356,6 +365,47 @@ jobs:
               ls -la "${d}" 2>/dev/null | head -20 || true
             done
           } 2>&1 | tee "${DIST}/logs/clone-aosp-deps.log"
+
+      - name: Patch local Bazel workspace
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${WORKROOT}/kernel"
+          mkdir -p "${DIST}/logs"
+
+          {
+            echo "==== KERNEL_VERSION ===="
+            echo "KERNEL_VERSION=${KERNEL_VERSION}"
+
+            echo
+            echo "==== Ensure common kernel package is visible ===="
+            ls -la kernel-6.12 || true
+            ls -la kernel-6.12/BUILD.bazel || true
+            ls -la kernel-6.12/build.config.constants || true
+
+            echo
+            echo "==== Patch missing BUILD files for local .bzl packages ===="
+
+            touch build/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules
+            touch build/bazel_common_rules/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules/dist
+            touch build/bazel_common_rules/dist/BUILD.bazel
+
+            echo
+            echo "==== Verify patched BUILD files ===="
+            ls -la build/BUILD.bazel || true
+            ls -la build/bazel_common_rules/BUILD.bazel || true
+            ls -la build/bazel_common_rules/dist/BUILD.bazel || true
+
+            echo
+            echo "==== dist.bzl ===="
+            ls -la build/bazel_common_rules/dist/dist.bzl || true
+            sed -n '1,120p' build/bazel_common_rules/dist/dist.bzl || true
+          } 2>&1 | tee "${DIST}/logs/patch-local-bazel-workspace.log"
 
       - name: Verify Bazel launcher
         shell: bash
@@ -412,41 +462,6 @@ jobs:
             ./tools/bazel info || true
           } 2>&1 | tee "${DIST}/logs/verify-bazel-launcher.log"
 
-      - name: Patch local Bazel workspace for OPPO MGK rules
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "${WORKROOT}/kernel"
-          mkdir -p "${DIST}/logs"
-
-          {
-            echo "==== Exported KERNEL_VERSION ===="
-            echo "KERNEL_VERSION=${KERNEL_VERSION}"
-
-            echo
-            echo "==== Patch missing BUILD files for local .bzl packages ===="
-
-            touch build/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules
-            touch build/bazel_common_rules/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/dist
-            touch build/bazel_common_rules/dist/BUILD.bazel
-
-            echo
-            echo "==== Verify patched BUILD files ===="
-            ls -la build/BUILD.bazel || true
-            ls -la build/bazel_common_rules/BUILD.bazel || true
-            ls -la build/bazel_common_rules/dist/BUILD.bazel || true
-
-            echo
-            echo "==== dist.bzl ===="
-            ls -la build/bazel_common_rules/dist/dist.bzl || true
-            sed -n '1,120p' build/bazel_common_rules/dist/dist.bzl || true
-          } 2>&1 | tee "${DIST}/logs/patch-local-bazel-workspace.log"
-
       - name: Query Bazel targets
         shell: bash
         continue-on-error: true
@@ -461,11 +476,9 @@ jobs:
             pwd
 
             echo
-            echo "==== WORKSPACE / MODULE.bazel / BUILD.bazel ===="
-            ls -la WORKSPACE MODULE.bazel BUILD.bazel 2>/dev/null || true
-            readlink -f WORKSPACE 2>/dev/null || true
-            readlink -f MODULE.bazel 2>/dev/null || true
-            readlink -f BUILD.bazel 2>/dev/null || true
+            echo "==== package visibility ===="
+            ls -la kernel-6.12/BUILD.bazel || true
+            ls -la kernel-6.12/build.config.constants || true
 
             echo
             echo "==== bazel version ===="
@@ -477,15 +490,16 @@ jobs:
 
             echo
             echo "==== query //kernel-6.12:* ===="
-            ./tools/bazel query '//kernel-6.12:*' || true
+            ./tools/bazel query '//kernel-6.12:*' | tee "${DIST}/logs/query-kernel-6.12-targets.raw" || true
 
             echo
             echo "==== query //kernel_device_modules-6.12:* ===="
-            ./tools/bazel query '//kernel_device_modules-6.12:*' || true
+            ./tools/bazel query '//kernel_device_modules-6.12:*' | tee "${DIST}/logs/query-device-modules-targets.raw" || true
 
             echo
             echo "==== query all interesting ===="
             ./tools/bazel query '//...' 2>&1 \
+              | tee "${DIST}/logs/query-all.raw" \
               | grep -Ei 'mgk|k612|mtk|device|module|dtb|dtbo|dist|mt6895|k6895|gki|aarch64|kernel_aarch64' \
               | sort || true
           } 2>&1 | tee "${DIST}/logs/query-bazel-targets.log"
@@ -503,7 +517,12 @@ jobs:
           GKI_BUILT=0
 
           {
-            echo "==== Try known GKI targets ===="
+            echo "==== Refresh kernel-6.12 targets ===="
+            ./tools/bazel query '//kernel-6.12:*' > "${DIST}/logs/gki-targets.raw" 2>&1 || true
+            cat "${DIST}/logs/gki-targets.raw" || true
+
+            echo
+            echo "==== Build known GKI targets ===="
 
             for target in \
               "//kernel-6.12:kernel_aarch64_dist" \
@@ -517,7 +536,7 @@ jobs:
               echo
               echo "==== Checking ${target} ===="
 
-              if ./tools/bazel query "${target}" >/dev/null 2>&1; then
+              if grep -qx "${target}" "${DIST}/logs/gki-targets.raw"; then
                 echo "FOUND ${target}"
 
                 if echo "${target}" | grep -q "_dist$"; then
@@ -528,24 +547,6 @@ jobs:
                 else
                   if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
                     GKI_BUILT=1
-
-                    BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
-
-                    if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
-                      find "${BAZEL_BIN}" -type f \( \
-                        -name "Image" -o \
-                        -name "Image.gz" -o \
-                        -name "Image.lz4" -o \
-                        -name "vmlinux" -o \
-                        -name "System.map" \
-                      \) -print | sort > "${DIST}/logs/gki-bazel-files.list" || true
-
-                      while read -r f; do
-                        [ -f "$f" ] || continue
-                        cp -av "$f" "${DIST}/gki/" || true
-                      done < "${DIST}/logs/gki-bazel-files.list"
-                    fi
-
                     break
                   fi
                 fi
@@ -553,6 +554,36 @@ jobs:
                 echo "MISSING ${target}"
               fi
             done
+
+            if [ "${GKI_BUILT}" != "1" ]; then
+              echo
+              echo "==== Try auto-selected GKI dist targets ===="
+
+              grep -Ei '(^//kernel-6.12:.*(gki|kernel).*aarch64.*dist$|^//kernel-6.12:.*dist$)' \
+                "${DIST}/logs/gki-targets.raw" \
+                | sort -u > "${DIST}/logs/gki-auto-candidates.list" || true
+
+              cat "${DIST}/logs/gki-auto-candidates.list" || true
+
+              while read -r target; do
+                [ -n "${target}" ] || continue
+
+                echo
+                echo "==== Auto trying ${target} ===="
+
+                if echo "${target}" | grep -q "_dist$"; then
+                  if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/gki"; then
+                    GKI_BUILT=1
+                    break
+                  fi
+                else
+                  if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
+                    GKI_BUILT=1
+                    break
+                  fi
+                fi
+              done < "${DIST}/logs/gki-auto-candidates.list"
+            fi
 
             echo
             echo "GKI_BUILT=${GKI_BUILT}"
@@ -594,19 +625,12 @@ jobs:
           MODULES_BUILT=0
 
           {
-            echo "==== Query module targets ===="
-            ./tools/bazel query '//kernel_device_modules-6.12:*' 2>&1 \
-              | sort \
-              | tee "${DIST}/logs/module-targets.raw" || true
+            echo "==== Refresh module targets ===="
+            ./tools/bazel query '//kernel_device_modules-6.12:*' > "${DIST}/logs/module-targets.raw" 2>&1 || true
+            cat "${DIST}/logs/module-targets.raw" || true
 
             echo
-            echo "==== Filtered module targets ===="
-            cat "${DIST}/logs/module-targets.raw" \
-              | grep -Ei 'mgk_64_k612|mgk|k612|dist|module|dtb|dtbo' \
-              | sort || true
-
-            echo
-            echo "==== Try known module targets ===="
+            echo "==== Build known module targets ===="
 
             for target in \
               "//kernel_device_modules-6.12:mgk_64_k612_dist" \
@@ -620,7 +644,7 @@ jobs:
               echo
               echo "==== Checking ${target} ===="
 
-              if ./tools/bazel query "${target}" >/dev/null 2>&1; then
+              if grep -qx "${target}" "${DIST}/logs/module-targets.raw"; then
                 echo "FOUND ${target}"
 
                 if echo "${target}" | grep -q "_dist$"; then
@@ -631,25 +655,6 @@ jobs:
                 else
                   if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
                     MODULES_BUILT=1
-
-                    BAZEL_BIN="$(./tools/bazel info bazel-bin 2>/dev/null || true)"
-
-                    if [ -n "${BAZEL_BIN}" ] && [ -d "${BAZEL_BIN}" ]; then
-                      find "${BAZEL_BIN}" -type f \( \
-                        -name "*.ko" -o \
-                        -name "*.dtb" -o \
-                        -name "*.dtbo" -o \
-                        -name "modules.order" -o \
-                        -name "Module.symvers" -o \
-                        -name "*.symvers" \
-                      \) -print | sort > "${DIST}/logs/modules-bazel-files.list" || true
-
-                      while read -r f; do
-                        [ -f "$f" ] || continue
-                        cp -av "$f" "${DIST}/modules-bazel/" || true
-                      done < "${DIST}/logs/modules-bazel-files.list"
-                    fi
-
                     break
                   fi
                 fi
@@ -657,6 +662,36 @@ jobs:
                 echo "MISSING ${target}"
               fi
             done
+
+            if [ "${MODULES_BUILT}" != "1" ]; then
+              echo
+              echo "==== Try auto-selected module dist targets ===="
+
+              grep -Ei '(^//kernel_device_modules-6.12:.*(mgk|k612|module|dtb|dtbo).*dist$|^//kernel_device_modules-6.12:.*dist$)' \
+                "${DIST}/logs/module-targets.raw" \
+                | sort -u > "${DIST}/logs/module-auto-candidates.list" || true
+
+              cat "${DIST}/logs/module-auto-candidates.list" || true
+
+              while read -r target; do
+                [ -n "${target}" ] || continue
+
+                echo
+                echo "==== Auto trying ${target} ===="
+
+                if echo "${target}" | grep -q "_dist$"; then
+                  if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/modules-bazel"; then
+                    MODULES_BUILT=1
+                    break
+                  fi
+                else
+                  if ./tools/bazel build ${BAZEL_FLAGS} "${target}"; then
+                    MODULES_BUILT=1
+                    break
+                  fi
+                fi
+              done < "${DIST}/logs/module-auto-candidates.list"
+            fi
 
             echo
             echo "MODULES_BUILT=${MODULES_BUILT}"
