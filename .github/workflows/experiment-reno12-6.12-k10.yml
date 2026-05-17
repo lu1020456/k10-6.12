@@ -21,6 +21,15 @@ on:
           - "true"
           - "false"
 
+      clone_ndk:
+        description: "Clone platform/prebuilts/ndk as prebuilts/ndk-r27"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
       strict_fail:
         description: "Fail workflow when build fails"
         required: true
@@ -167,56 +176,123 @@ jobs:
           chmod +x kernel/build/kernel/kleaf/bazel.sh || true
           chmod +x kernel/build/kernel/kleaf/bazel.origin.sh || true
 
-      - name: Clone required AOSP Kleaf prebuilts
+      - name: Clone AOSP prebuilts and Bazel externals
         shell: bash
         run: |
           set -euxo pipefail
 
           cd "${WORKROOT}/kernel"
           mkdir -p "${DIST}/logs"
-          mkdir -p prebuilts
+
+          clone_aosp() {
+            local repo="$1"
+            local dest="$2"
+
+            if [ -d "${dest}/.git" ]; then
+              echo "Already cloned: ${dest}"
+              return 0
+            fi
+
+            rm -rf "${dest}"
+            mkdir -p "$(dirname "${dest}")"
+
+            echo
+            echo "==== Clone ${repo} -> ${dest} ===="
+
+            for branch in android16-release main-kernel main master; do
+              echo "Trying branch ${branch}"
+              if git clone --depth=1 --branch "${branch}" \
+                "https://android.googlesource.com/${repo}" \
+                "${dest}"; then
+                echo "Cloned ${repo} branch ${branch}"
+                return 0
+              fi
+
+              rm -rf "${dest}"
+            done
+
+            echo "Trying default branch"
+            git clone --depth=1 \
+              "https://android.googlesource.com/${repo}" \
+              "${dest}"
+          }
 
           {
-            echo "==== Clone platform prebuilts/build-tools for py3-cmd ===="
-            if [ ! -d prebuilts/build-tools ]; then
-              git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/build-tools \
-                prebuilts/build-tools
+            echo "==== Clone required prebuilts ===="
+
+            clone_aosp "platform/prebuilts/build-tools" \
+              "prebuilts/build-tools"
+
+            clone_aosp "kernel/prebuilts/build-tools" \
+              "prebuilts/kernel-build-tools"
+
+            clone_aosp "platform/prebuilts/clang/host/linux-x86" \
+              "prebuilts/clang/host/linux-x86"
+
+            clone_aosp "platform/prebuilts/rust" \
+              "prebuilts/rust"
+
+            clone_aosp "platform/prebuilts/jdk/jdk17/linux-x86" \
+              "prebuilts/jdk/jdk17/linux-x86"
+
+            if [ "${{ github.event.inputs.clone_ndk }}" = "true" ]; then
+              clone_aosp "platform/prebuilts/ndk" \
+                "prebuilts/ndk-r27"
             fi
 
             echo
-            echo "==== Clone kernel prebuilts/build-tools as prebuilts/kernel-build-tools ===="
-            if [ ! -d prebuilts/kernel-build-tools ]; then
-              git clone --depth=1 \
-                https://android.googlesource.com/kernel/prebuilts/build-tools \
-                prebuilts/kernel-build-tools
-            fi
+            echo "==== Clone Bazel / Bzlmod external repositories ===="
+
+            clone_aosp "platform/external/bazel-skylib" \
+              "external/bazel-skylib"
+
+            clone_aosp "platform/external/bazelbuild-platforms" \
+              "external/bazelbuild-platforms"
+
+            clone_aosp "platform/external/bazelbuild-rules_cc" \
+              "external/bazelbuild-rules_cc"
+
+            clone_aosp "platform/external/bazelbuild-rules_license" \
+              "external/bazelbuild-rules_license"
+
+            clone_aosp "platform/external/bazelbuild-rules_pkg" \
+              "external/bazelbuild-rules_pkg"
+
+            clone_aosp "platform/external/bazelbuild-rules_python" \
+              "external/bazelbuild-rules_python"
+
+            clone_aosp "platform/external/bazelbuild-rules_shell" \
+              "external/bazelbuild-rules_shell"
+
+            clone_aosp "platform/external/bazel-contrib-bazel_features" \
+              "external/bazel-contrib-bazel_features"
+
+            clone_aosp "platform/external/python/absl-py" \
+              "external/python/absl-py"
 
             echo
-            echo "==== Clone prebuilts/clang/host/linux-x86 ===="
-            if [ ! -d prebuilts/clang/host/linux-x86 ]; then
-              mkdir -p prebuilts/clang/host
-              git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-                prebuilts/clang/host/linux-x86
-            fi
+            echo "==== Clone Kleaf host tool source repositories ===="
 
-            echo
-            echo "==== Clone prebuilts/rust ===="
-            if [ ! -d prebuilts/rust ]; then
-              git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/rust \
-                prebuilts/rust
-            fi
+            clone_aosp "platform/external/libcap" \
+              "external/libcap"
 
-            echo
-            echo "==== Clone prebuilts/jdk/jdk17/linux-x86 ===="
-            if [ ! -d prebuilts/jdk/jdk17/linux-x86 ]; then
-              mkdir -p prebuilts/jdk/jdk17
-              git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/jdk/jdk17/linux-x86 \
-                prebuilts/jdk/jdk17/linux-x86 || true
-            fi
+            clone_aosp "platform/external/libcap-ng" \
+              "external/libcap-ng"
+
+            clone_aosp "platform/external/lz4" \
+              "external/lz4"
+
+            clone_aosp "platform/external/toybox" \
+              "external/toybox"
+
+            clone_aosp "platform/external/zlib" \
+              "external/zlib"
+
+            clone_aosp "platform/external/zopfli" \
+              "external/zopfli"
+
+            clone_aosp "platform/external/pigz" \
+              "external/pigz"
 
             echo
             echo "==== Required py3-cmd ===="
@@ -240,7 +316,37 @@ jobs:
             echo
             echo "==== JDK sample ===="
             find prebuilts/jdk -maxdepth 8 -type f -name java | sort | head -20 || true
-          } 2>&1 | tee "${DIST}/logs/clone-kleaf-prebuilts.log"
+
+            echo
+            echo "==== NDK sample ===="
+            find prebuilts/ndk-r27 -maxdepth 4 -type f | sort | head -40 || true
+
+            echo
+            echo "==== External repository summary ===="
+            for d in \
+              external/bazel-skylib \
+              external/bazelbuild-platforms \
+              external/bazelbuild-rules_cc \
+              external/bazelbuild-rules_license \
+              external/bazelbuild-rules_pkg \
+              external/bazelbuild-rules_python \
+              external/bazelbuild-rules_shell \
+              external/bazel-contrib-bazel_features \
+              external/python/absl-py \
+              external/libcap \
+              external/libcap-ng \
+              external/lz4 \
+              external/toybox \
+              external/zlib \
+              external/zopfli \
+              external/pigz
+            do
+              echo
+              echo "---- ${d} ----"
+              test -d "${d}" && git -C "${d}" log -1 --oneline || true
+              ls -la "${d}" 2>/dev/null | head -20 || true
+            done
+          } 2>&1 | tee "${DIST}/logs/clone-aosp-deps.log"
 
       - name: Verify Bazel launcher
         shell: bash
@@ -269,7 +375,15 @@ jobs:
 
             echo
             echo "==== bazel.origin.sh first lines ===="
-            sed -n '1,120p' build/kernel/kleaf/bazel.origin.sh || true
+            sed -n '1,140p' build/kernel/kleaf/bazel.origin.sh || true
+
+            echo
+            echo "==== MODULE.bazel ===="
+            cat MODULE.bazel || true
+
+            echo
+            echo "==== WORKSPACE ===="
+            cat WORKSPACE || true
 
             echo
             echo "==== tools/bazel version ===="
