@@ -203,12 +203,11 @@ jobs:
             fi
 
             echo
-            echo "==== Clone prebuilts/rust/linux-x86 ===="
-            if [ ! -d prebuilts/rust/linux-x86 ]; then
-              mkdir -p prebuilts/rust
+            echo "==== Clone prebuilts/rust ===="
+            if [ ! -d prebuilts/rust ]; then
               git clone --depth=1 \
-                https://android.googlesource.com/platform/prebuilts/rust/linux-x86 \
-                prebuilts/rust/linux-x86
+                https://android.googlesource.com/platform/prebuilts/rust \
+                prebuilts/rust
             fi
 
             echo
@@ -234,7 +233,11 @@ jobs:
 
             echo
             echo "==== Rust sample ===="
-            find prebuilts/rust/linux-x86 -maxdepth 6 -type f -name rustc | sort | head -20 || true
+            find prebuilts/rust -maxdepth 8 -type f -name rustc | sort | head -20 || true
+
+            echo
+            echo "==== JDK sample ===="
+            find prebuilts/jdk -maxdepth 8 -type f -name java | sort | head -20 || true
           } 2>&1 | tee "${DIST}/logs/clone-kleaf-prebuilts.log"
 
       - name: Verify Bazel launcher
@@ -258,7 +261,7 @@ jobs:
 
             echo
             echo "==== bazel.origin.sh first lines ===="
-            sed -n '1,80p' build/kernel/kleaf/bazel.origin.sh || true
+            sed -n '1,100p' build/kernel/kleaf/bazel.origin.sh || true
 
             echo
             echo "==== tools/bazel version ===="
