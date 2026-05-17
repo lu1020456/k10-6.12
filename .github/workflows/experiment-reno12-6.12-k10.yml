@@ -408,19 +408,22 @@ jobs:
             echo
             echo "==== Patch kernel-build-tools sysroot compatibility ===="
 
-            # AOSP kernel/prebuilts/build-tools uses:
-            #   sysroots/x86_64-unknown-linux-musl
-            # but build/kernel/BUILD.bazel expects:
-            #   build-tools/sysroot/**
-            rm -rf prebuilts/kernel-build-tools/sysroot
-            ln -s sysroots/x86_64-unknown-linux-musl prebuilts/kernel-build-tools/sysroot
-
+            # Bazel glob in //build/kernel expects real files under:
+            #   build/kernel/build-tools/sysroot/**
+            # Symlinks were not enough in prior runs, so copy real files.
             rm -rf build/kernel/build-tools
-            ln -s ../../prebuilts/kernel-build-tools build/kernel/build-tools
+            mkdir -p build/kernel/build-tools
+
+            rsync -a prebuilts/kernel-build-tools/ build/kernel/build-tools/
+
+            rm -rf build/kernel/build-tools/sysroot
+            cp -a prebuilts/kernel-build-tools/sysroots/x86_64-unknown-linux-musl \
+              build/kernel/build-tools/sysroot
 
             echo
             echo "==== Ignore Bazel output tree for //... query ===="
             grep -qxF "out" .bazelignore 2>/dev/null || echo "out" >> .bazelignore
+            grep -qxF "prebuilts/clang" .bazelignore 2>/dev/null || echo "prebuilts/clang" >> .bazelignore
 
             echo
             echo "==== Verify patched files ===="
@@ -428,9 +431,12 @@ jobs:
             ls -la build/bazel_common_rules || true
             ls -la build/bazel_common_rules/dist || true
             ls -la build/bazel_common_rules/dist/dist.bzl || true
-            ls -la prebuilts/kernel-build-tools/sysroot || true
             ls -la build/kernel/build-tools || true
             ls -la build/kernel/build-tools/sysroot || true
+
+            echo
+            echo "==== Verify real sysroot files ===="
+            find build/kernel/build-tools/sysroot -maxdepth 3 -type f | sort | head -80 || true
 
             echo
             echo "==== dist.bzl ===="
@@ -468,6 +474,7 @@ jobs:
             echo "==== build/kernel/build-tools ===="
             ls -la build/kernel/build-tools || true
             ls -la build/kernel/build-tools/sysroot || true
+            find build/kernel/build-tools/sysroot -maxdepth 2 -type f | sort | head -40 || true
 
             echo
             echo "==== Bazel Common Rules ===="
@@ -477,6 +484,10 @@ jobs:
             echo "==== Bazel Central Registry stardoc check ===="
             ls -la external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel || true
             sed -n '1,80p' external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel 2>/dev/null || true
+
+            echo
+            echo "==== .bazelignore ===="
+            cat .bazelignore || true
 
             echo
             echo "==== tools/bazel ===="
@@ -524,6 +535,7 @@ jobs:
             ls -la kernel-6.12/build.config.constants || true
             ls -la build/bazel_common_rules/dist/dist.bzl || true
             ls -la build/kernel/build-tools/sysroot || true
+            find build/kernel/build-tools/sysroot -maxdepth 2 -type f | sort | head -40 || true
 
             echo
             echo "==== bazel version ===="
@@ -540,13 +552,6 @@ jobs:
             echo
             echo "==== query //kernel_device_modules-6.12:* ===="
             ./tools/bazel query '//kernel_device_modules-6.12:*' | tee "${DIST}/logs/query-device-modules-targets.raw" || true
-
-            echo
-            echo "==== query all interesting ===="
-            ./tools/bazel query '//...' 2>&1 \
-              | tee "${DIST}/logs/query-all.raw" \
-              | grep -Ei 'mgk|k612|mtk|device|module|dtb|dtbo|dist|mt6895|k6895|gki|aarch64|kernel_aarch64' \
-              | sort || true
           } 2>&1 | tee "${DIST}/logs/query-bazel-targets.log"
 
       - name: Build GKI Image
@@ -678,16 +683,15 @@ jobs:
             echo "==== Build known module targets ===="
 
             for target in \
+              "//kernel_device_modules-6.12:mgk_64_k612_modules.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612_kernel_aarch64.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612_modules.eng" \
+              "//kernel_device_modules-6.12:mgk_64_k612.eng" \
               "//kernel_device_modules-6.12:mgk_64_k612_customer_dist.userdebug" \
               "//kernel_device_modules-6.12:mgk_64_k612_internal_dist.userdebug" \
               "//kernel_device_modules-6.12:mgk_64_k612_customer_dist.eng" \
-              "//kernel_device_modules-6.12:mgk_64_k612_internal_dist.eng" \
-              "//kernel_device_modules-6.12:mgk_64_k612.userdebug" \
-              "//kernel_device_modules-6.12:mgk_64_k612.eng" \
-              "//kernel_device_modules-6.12:mgk_64_k612_modules.userdebug" \
-              "//kernel_device_modules-6.12:mgk_64_k612_modules.eng" \
-              "//kernel_device_modules-6.12:mgk_64_k612_dist" \
-              "//kernel_device_modules-6.12:mgk_64_k612"
+              "//kernel_device_modules-6.12:mgk_64_k612_internal_dist.eng"
             do
               echo
               echo "==== Checking ${target} ===="
