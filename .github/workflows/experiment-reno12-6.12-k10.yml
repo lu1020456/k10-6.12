@@ -321,8 +321,8 @@ jobs:
             chmod +x prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel || true
 
             echo
-            echo "==== kernel-build-tools sysroot sample ===="
-            find prebuilts/kernel-build-tools/sysroot -maxdepth 3 -type f | sort | head -40 || true
+            echo "==== kernel-build-tools sysroots sample ===="
+            find prebuilts/kernel-build-tools/sysroots -maxdepth 3 -type f | sort | head -40 || true
 
             echo
             echo "==== build/bazel_common_rules sample ===="
@@ -396,36 +396,39 @@ jobs:
 
             touch build/BUILD.bazel
 
-            mkdir -p build/bazel_common_rules
-            touch build/bazel_common_rules/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/dist
-            touch build/bazel_common_rules/dist/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/exec
-            touch build/bazel_common_rules/exec/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/platforms
-            touch build/bazel_common_rules/platforms/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/rules
-            touch build/bazel_common_rules/rules/BUILD.bazel
-
-            mkdir -p build/bazel_common_rules/workspace
-            touch build/bazel_common_rules/workspace/BUILD.bazel
+            # Do not shadow AOSP BUILD files with empty BUILD.bazel files.
+            # build/bazel_common_rules comes from platform/build/bazel_common_rules.
+            rm -f build/bazel_common_rules/BUILD.bazel || true
+            rm -f build/bazel_common_rules/dist/BUILD.bazel || true
+            rm -f build/bazel_common_rules/exec/BUILD.bazel || true
+            rm -f build/bazel_common_rules/platforms/BUILD.bazel || true
+            rm -f build/bazel_common_rules/rules/BUILD.bazel || true
+            rm -f build/bazel_common_rules/workspace/BUILD.bazel || true
 
             echo
-            echo "==== Patch build/kernel/build-tools symlink ===="
+            echo "==== Patch kernel-build-tools sysroot compatibility ===="
+
+            # AOSP kernel/prebuilts/build-tools uses:
+            #   sysroots/x86_64-unknown-linux-musl
+            # but build/kernel/BUILD.bazel expects:
+            #   build-tools/sysroot/**
+            rm -rf prebuilts/kernel-build-tools/sysroot
+            ln -s sysroots/x86_64-unknown-linux-musl prebuilts/kernel-build-tools/sysroot
 
             rm -rf build/kernel/build-tools
             ln -s ../../prebuilts/kernel-build-tools build/kernel/build-tools
 
             echo
-            echo "==== Verify patched BUILD files ===="
+            echo "==== Ignore Bazel output tree for //... query ===="
+            grep -qxF "out" .bazelignore 2>/dev/null || echo "out" >> .bazelignore
+
+            echo
+            echo "==== Verify patched files ===="
             ls -la build/BUILD.bazel || true
-            ls -la build/bazel_common_rules/BUILD.bazel || true
-            ls -la build/bazel_common_rules/dist/BUILD.bazel || true
+            ls -la build/bazel_common_rules || true
+            ls -la build/bazel_common_rules/dist || true
             ls -la build/bazel_common_rules/dist/dist.bzl || true
+            ls -la prebuilts/kernel-build-tools/sysroot || true
             ls -la build/kernel/build-tools || true
             ls -la build/kernel/build-tools/sysroot || true
 
@@ -435,7 +438,7 @@ jobs:
 
             echo
             echo "==== build/kernel/BUILD.bazel first lines ===="
-            sed -n '1,80p' build/kernel/BUILD.bazel || true
+            sed -n '1,120p' build/kernel/BUILD.bazel || true
           } 2>&1 | tee "${DIST}/logs/patch-local-bazel-workspace.log"
 
       - name: Verify Bazel launcher
@@ -581,7 +584,7 @@ jobs:
               if grep -qx "${target}" "${DIST}/logs/gki-targets.raw"; then
                 echo "FOUND ${target}"
 
-                if echo "${target}" | grep -q "_dist$"; then
+                if echo "${target}" | grep -Eq "_dist($|\.)"; then
                   if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/gki"; then
                     GKI_BUILT=1
                     break
@@ -601,7 +604,7 @@ jobs:
               echo
               echo "==== Try auto-selected GKI dist targets ===="
 
-              grep -Ei '(^//kernel-6.12:.*(gki|kernel).*aarch64.*dist$|^//kernel-6.12:.*dist$)' \
+              grep -Ei '(^//kernel-6.12:.*(gki|kernel).*aarch64.*dist($|\.)|^//kernel-6.12:.*dist($|\.))' \
                 "${DIST}/logs/gki-targets.raw" \
                 | sort -u > "${DIST}/logs/gki-auto-candidates.list" || true
 
@@ -613,7 +616,7 @@ jobs:
                 echo
                 echo "==== Auto trying ${target} ===="
 
-                if echo "${target}" | grep -q "_dist$"; then
+                if echo "${target}" | grep -Eq "_dist($|\.)"; then
                   if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/gki"; then
                     GKI_BUILT=1
                     break
@@ -675,13 +678,16 @@ jobs:
             echo "==== Build known module targets ===="
 
             for target in \
+              "//kernel_device_modules-6.12:mgk_64_k612_customer_dist.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612_internal_dist.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612_customer_dist.eng" \
+              "//kernel_device_modules-6.12:mgk_64_k612_internal_dist.eng" \
+              "//kernel_device_modules-6.12:mgk_64_k612.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612.eng" \
+              "//kernel_device_modules-6.12:mgk_64_k612_modules.userdebug" \
+              "//kernel_device_modules-6.12:mgk_64_k612_modules.eng" \
               "//kernel_device_modules-6.12:mgk_64_k612_dist" \
-              "//kernel_device_modules-6.12:mgk_64_k612" \
-              "//kernel_device_modules-6.12:kernel_device_modules_dist" \
-              "//kernel_device_modules-6.12:kernel_device_modules" \
-              "//kernel_device_modules-6.12:modules" \
-              "//kernel_device_modules-6.12:dtbs" \
-              "//kernel_device_modules-6.12:dtbo"
+              "//kernel_device_modules-6.12:mgk_64_k612"
             do
               echo
               echo "==== Checking ${target} ===="
@@ -689,7 +695,7 @@ jobs:
               if grep -qx "${target}" "${DIST}/logs/module-targets.raw"; then
                 echo "FOUND ${target}"
 
-                if echo "${target}" | grep -q "_dist$"; then
+                if echo "${target}" | grep -Eq "_dist($|\.)"; then
                   if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/modules-bazel"; then
                     MODULES_BUILT=1
                     break
@@ -709,7 +715,7 @@ jobs:
               echo
               echo "==== Try auto-selected module dist targets ===="
 
-              grep -Ei '(^//kernel_device_modules-6.12:.*(mgk|k612|module|dtb|dtbo).*dist$|^//kernel_device_modules-6.12:.*dist$)' \
+              grep -Ei '(^//kernel_device_modules-6.12:.*(mgk|k612|module|dtb|dtbo).*dist($|\.)|^//kernel_device_modules-6.12:.*dist($|\.))' \
                 "${DIST}/logs/module-targets.raw" \
                 | sort -u > "${DIST}/logs/module-auto-candidates.list" || true
 
@@ -721,7 +727,7 @@ jobs:
                 echo
                 echo "==== Auto trying ${target} ===="
 
-                if echo "${target}" | grep -q "_dist$"; then
+                if echo "${target}" | grep -Eq "_dist($|\.)"; then
                   if ./tools/bazel run ${BAZEL_FLAGS} "${target}" -- --destdir="${DIST}/modules-bazel"; then
                     MODULES_BUILT=1
                     break
