@@ -65,6 +65,7 @@ jobs:
       WORKROOT: ${{ github.workspace }}/kernel_platform
       DIST: ${{ github.workspace }}/kernel_platform/dist
 
+      KERNEL_VERSION: "mgk-6.12"
       BAZEL_FLAGS: "--jobs=6 --keep_going --verbose_failures"
 
     steps:
@@ -365,6 +366,10 @@ jobs:
           mkdir -p "${DIST}/logs"
 
           {
+            echo "==== KERNEL_VERSION ===="
+            echo "KERNEL_VERSION=${KERNEL_VERSION}"
+
+            echo
             echo "==== py3-cmd ===="
             ls -la prebuilts/build-tools/linux_musl-x86/bin/py3-cmd || true
             file prebuilts/build-tools/linux_musl-x86/bin/py3-cmd || true
@@ -406,6 +411,41 @@ jobs:
             echo "==== tools/bazel info ===="
             ./tools/bazel info || true
           } 2>&1 | tee "${DIST}/logs/verify-bazel-launcher.log"
+
+      - name: Patch local Bazel workspace for OPPO MGK rules
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "${WORKROOT}/kernel"
+          mkdir -p "${DIST}/logs"
+
+          {
+            echo "==== Exported KERNEL_VERSION ===="
+            echo "KERNEL_VERSION=${KERNEL_VERSION}"
+
+            echo
+            echo "==== Patch missing BUILD files for local .bzl packages ===="
+
+            touch build/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules
+            touch build/bazel_common_rules/BUILD.bazel
+
+            mkdir -p build/bazel_common_rules/dist
+            touch build/bazel_common_rules/dist/BUILD.bazel
+
+            echo
+            echo "==== Verify patched BUILD files ===="
+            ls -la build/BUILD.bazel || true
+            ls -la build/bazel_common_rules/BUILD.bazel || true
+            ls -la build/bazel_common_rules/dist/BUILD.bazel || true
+
+            echo
+            echo "==== dist.bzl ===="
+            ls -la build/bazel_common_rules/dist/dist.bzl || true
+            sed -n '1,120p' build/bazel_common_rules/dist/dist.bzl || true
+          } 2>&1 | tee "${DIST}/logs/patch-local-bazel-workspace.log"
 
       - name: Query Bazel targets
         shell: bash
