@@ -199,7 +199,7 @@ jobs:
             echo
             echo "==== Clone ${repo} -> ${dest} ===="
 
-            for branch in android16-release android16-qpr2-release android16-qpr1-release main-kernel main master; do
+            for branch in android16-release android16-qpr2-release android16-qpr1-release main-kernel main-kernel-2026 main-kernel-2025 main-kernel-build-2024 main master; do
               echo "Trying branch ${branch}"
               if git clone --depth=1 --branch "${branch}" \
                 "https://android.googlesource.com/${repo}" \
@@ -242,6 +242,9 @@ jobs:
 
             echo
             echo "==== Clone Bazel / Bzlmod external repositories ===="
+
+            clone_aosp "platform/external/bazelbuild-bazel-central-registry" \
+              "external/bazelbuild-bazel-central-registry"
 
             clone_aosp "platform/external/bazel-skylib" \
               "external/bazel-skylib"
@@ -322,8 +325,13 @@ jobs:
             find prebuilts/ndk-r27 -maxdepth 4 -type f | sort | head -40 || true
 
             echo
+            echo "==== Bazel Central Registry sample ===="
+            find external/bazelbuild-bazel-central-registry/modules -maxdepth 3 -type f -name MODULE.bazel | sort | head -80 || true
+
+            echo
             echo "==== External repository summary ===="
             for d in \
+              external/bazelbuild-bazel-central-registry \
               external/bazel-skylib \
               external/bazelbuild-platforms \
               external/bazelbuild-rules_cc \
@@ -368,6 +376,11 @@ jobs:
             prebuilts/kernel-build-tools/bazel/linux-x86_64/bazel --version || true
 
             echo
+            echo "==== Bazel Central Registry stardoc check ===="
+            ls -la external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel || true
+            sed -n '1,80p' external/bazelbuild-bazel-central-registry/modules/stardoc/0.7.2/MODULE.bazel 2>/dev/null || true
+
+            echo
             echo "==== tools/bazel ===="
             ls -la tools/bazel || true
             file tools/bazel || true
@@ -375,7 +388,7 @@ jobs:
 
             echo
             echo "==== bazel.origin.sh first lines ===="
-            sed -n '1,160p' build/kernel/kleaf/bazel.origin.sh || true
+            sed -n '1,180p' build/kernel/kleaf/bazel.origin.sh || true
 
             echo
             echo "==== MODULE.bazel ===="
