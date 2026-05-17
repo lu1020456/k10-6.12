@@ -199,7 +199,7 @@ jobs:
             echo
             echo "==== Clone ${repo} -> ${dest} ===="
 
-            for branch in android16-release main-kernel main master; do
+            for branch in android16-release android16-qpr2-release android16-qpr1-release main-kernel main master; do
               echo "Trying branch ${branch}"
               if git clone --depth=1 --branch "${branch}" \
                 "https://android.googlesource.com/${repo}" \
@@ -232,8 +232,8 @@ jobs:
             clone_aosp "platform/prebuilts/rust" \
               "prebuilts/rust"
 
-            clone_aosp "platform/prebuilts/jdk/jdk17/linux-x86" \
-              "prebuilts/jdk/jdk17/linux-x86"
+            clone_aosp "platform/prebuilts/jdk/jdk17" \
+              "prebuilts/jdk/jdk17"
 
             if [ "${{ github.event.inputs.clone_ndk }}" = "true" ]; then
               clone_aosp "platform/prebuilts/ndk" \
@@ -375,7 +375,7 @@ jobs:
 
             echo
             echo "==== bazel.origin.sh first lines ===="
-            sed -n '1,140p' build/kernel/kleaf/bazel.origin.sh || true
+            sed -n '1,160p' build/kernel/kleaf/bazel.origin.sh || true
 
             echo
             echo "==== MODULE.bazel ===="
